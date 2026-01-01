@@ -51,6 +51,26 @@ make test
 This directly calls the script to send a ban test message to the chat
 configured in `telegram.conf`.
 
+### Check fail2ban service status
+
+```bash
+cd /root/fail2ban-telegram
+make check
+```
+
+This checks if the fail2ban service is running and if fail2ban-client is working.
+
+### Verify bantime.increment and related configurations
+
+```bash
+cd /root/fail2ban-telegram
+make verify-config
+```
+
+This verifies that bantime.increment, bantime.factor, bantime.multipliers, and
+bantime.formula are properly configured in `/etc/fail2ban/jail.local`, and
+displays the current bantime and maxretry settings for active jails.
+
 > IMPORTANT: this project does **not** automatically modify your `jail.local`
 > or `jail.d/*.conf`. Jails such as `sshd` still need to be configured manually
 > with `action = %(action_)s` and `telegram[...]`.
