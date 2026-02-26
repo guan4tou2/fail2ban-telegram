@@ -46,6 +46,16 @@ class TelegramNotifier:
         self.enable_unban = self.config.getboolean('settings', 'enable_unban', fallback=True)
         self.server_name = self.config.get('settings', 'server_name', fallback='Server')
         self.enable_links = self.config.getboolean('settings', 'enable_links', fallback=True)
+
+        # psad-specific configuration (optional)
+        ignore_ips_raw = self.config.get('psad', 'ignore_ips', fallback='')
+        self.psad_ignore_ips = {
+            ip.strip() for ip in ignore_ips_raw.split(',') if ip.strip()
+        }
+        try:
+            self.psad_min_danger = self.config.getint('psad', 'min_danger_level', fallback=1)
+        except ValueError:
+            self.psad_min_danger = 1
         
         # Validate required configuration
         if not self.bot_token or not self.chat_id:
@@ -100,6 +110,11 @@ class TelegramNotifier:
             title = f"{emoji} *Fail2ban just unbanned {ip}*"
             status_emoji = '🔓'
             status_text = "unbanned"
+        elif event_type == 'psad':
+            emoji = '🔥'
+            title = f"{emoji} *PSAD detected scan from {ip}*"
+            status_emoji = '🚨'
+            status_text = "psad alert"
         else:
             emoji = 'ℹ️'
             title = f"{emoji} *Fail2ban Notification*"
@@ -307,6 +322,63 @@ class TelegramNotifier:
         # Send message
         self.send_message(message)
 
+    def handle_psad(self, src_ip: str, dst_ip: str = '', dst_port: str = '',
+                    proto: str = '', danger: str = ''):
+        """Handle a psad port-scan event"""
+        # Optional IP whitelist from config
+        if src_ip in self.psad_ignore_ips:
+            logger.info(
+                "Ignoring psad event from whitelisted IP: %s", src_ip
+            )
+            return
+
+        # Optional danger level filtering
+        danger_level = None
+        if danger:
+            try:
+                danger_level = int(danger)
+            except ValueError:
+                danger_level = None
+        if danger_level is not None and danger_level < self.psad_min_danger:
+            logger.info(
+                "Ignoring psad event from %s due to low danger level %s (min %s)",
+                src_ip,
+                danger_level,
+                self.psad_min_danger,
+            )
+            return
+
+        logger.info(
+            "Handling psad event: "
+            f"SRC={src_ip}, DST={dst_ip}, DPT={dst_port}, PROTO={proto}, DANGER={danger}"
+        )
+        
+        # Fetch IP info for the source (attacker) IP
+        ip_info = self.get_ip_info(src_ip)
+        
+        # Base message (reuses common formatting and geo info)
+        message = self.format_message('psad', src_ip, '', '', ip_info)
+        
+        # Append psad-specific details if available
+        extra_lines = []
+        if dst_ip or dst_port or proto or danger:
+            extra_lines.append("")
+            if dst_ip or dst_port:
+                target = dst_ip or ''
+                if dst_port:
+                    target = f"{target}:{dst_port}" if target else f"{dst_port}"
+                extra_lines.append(f"Target: {target}".strip())
+            if proto:
+                extra_lines.append(f"Protocol: {proto}")
+            if danger:
+                extra_lines.append(f"PSAD danger level: {danger}")
+        
+        if extra_lines:
+            message = message + "\n" + "\n".join(extra_lines)
+        
+        # Send message
+        self.send_message(message)
+
 
 def main():
     """CLI entry point"""
@@ -366,6 +438,19 @@ def main():
                 logger.error("Bot connection failed")
         except Exception as e:
             logger.error(f"Check failed: {e}")
+    
+    elif action == 'psad':
+        # psad external script integration:
+        # fail2ban-telegram.py psad <SRCIP> [DSTIP] [DPT] [PROTO] [DANGER]
+        if len(sys.argv) < 3:
+            logger.error("psad action requires at least a source IP address")
+            sys.exit(1)
+        src_ip = sys.argv[2]
+        dst_ip = sys.argv[3] if len(sys.argv) > 3 else ''
+        dst_port = sys.argv[4] if len(sys.argv) > 4 else ''
+        proto = sys.argv[5] if len(sys.argv) > 5 else ''
+        danger = sys.argv[6] if len(sys.argv) > 6 else ''
+        notifier.handle_psad(src_ip, dst_ip, dst_port, proto, danger)
     
     else:
         logger.error(f"Unknown action: {action}")

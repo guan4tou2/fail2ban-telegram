@@ -71,6 +71,31 @@ This verifies that bantime.increment, bantime.factor, bantime.multipliers, and
 bantime.formula are properly configured in `/etc/fail2ban/jail.local`, and
 displays the current bantime and maxretry settings for active jails.
 
+### Integrate with psad (Port Scan Attack Detector)
+
+You can have psad call this Telegram script directly when it detects a port
+scan by enabling psad's external script support and pointing it at
+`fail2ban-telegram.py`:
+
+1. Edit `/etc/psad/psad.conf` and set:
+
+   ```text
+   ENABLE_EXT_SCRIPT_EXEC      Y;
+   EXTERNAL_SCRIPT             /usr/local/bin/fail2ban-telegram.py psad SRCIP;
+   EXEC_EXT_SCRIPT_PER_ALERT   Y;
+   ```
+
+   The `SRCIP` token will be replaced by the attacker source IP. The script
+   will resolve geo information for that IP and send a PSAD alert to Telegram.
+
+2. Reload / restart psad so the changes take effect, for example:
+
+   ```bash
+   sudo systemctl restart psad
+   # or (depending on your distro)
+   sudo psad -R
+   ```
+
 > IMPORTANT: this project does **not** automatically modify your `jail.local`
 > or `jail.d/*.conf`. Jails such as `sshd` still need to be configured manually
 > with `action = %(action_)s` and `telegram[...]`.
